@@ -1,176 +1,191 @@
-Practical Machine Learning: Course project
-==========================================
+Introduction
+------------
 
-The goal of the project
------------------------
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now
+possible to collect a large amount of data about personal activity
+relatively inexpensively. These type of devices are part of the
+quantified self movement - a group of enthusiasts who take measurements
+about themselves regularly to improve their health, to find patterns in
+their behavior, or because they are tech geeks. One thing that people
+regularly do is quantify how much of a particular activity they do, but
+they rarely quantify how well they do it.
 
-The description of the assignment contains the following information on
-the dataset:
+In this project, we will use accelerometers data from the belt, forearm,
+arm, and dumbell of 6 participants to predict the manner in which they
+did the exercise.
 
-> In this project, your goal will be to use data from accelerometers on
-> the belt, forearm, arm, and dumbell of 6 participants. They were asked
-> to perform barbell lifts correctly and incorrectly in 5 different
-> ways.
-
-The goal is
-
-> to predict the manner in which they did the exercise.
-
-The training of the model
--------------------------
-
-In the following, I describe the steps concerning the training of a
-predictive model.
-
-### Read the data
-
-First, the `.csv` file contain the training data is read into R. Here,
-unavailable values are set as `NA`.
-
-    rawData <- read.csv("pml-training.csv", na.strings = c("NA", ""))
-
-### Reduce the dataset
-
-In the next step, I check the proportion of missing values (`NA`s) in
-the columns.
-
-    propNAs <- colMeans(is.na(rawData))
-    table(propNAs)
-
-    ## propNAs
-    ##                 0 0.979308938946081 
-    ##                60               100
-
-There are 100 columns in which almost all values (97.93%) are missing.
-If a column contains a large number of `NA`s, it will not be of great
-use for training the model. Hence, these columns will be removed. Only
-the columns without any `NA`s will be kept.
-
-    # index of columns with NA values
-    idx <- !propNAs
-    # check
-    sum(idx)
-
-    ## [1] 60
-
-    # remove these columns  
-    rawDataReduced <- rawData[idx]
-    # check
-    ncol(rawDataReduced)
-
-    ## [1] 60
-
-There are further unnecessary columns that can be removed. The column
-`X` contains the row numbers. The column `user_name` contains the name
-of the user. Of course, these variables cannot predictors for the type
-of exercise.
-
-Furthermore, the three columns containing time stamps
-(`raw_timestamp_part_1`, `raw_timestamp_part_2`, and `cvtd_timestamp`)
-will not be used.
-
-The factors `new_window` and `num_window` are not related to sensor
-data. They will be removed too.
-
-    # find columns not containing sensor measurement data
-    idx <- grep("^X$|user_name|timestamp|window", names(rawDataReduced))
-    # check
-    length(idx)
-
-    ## [1] 7
-
-    # remove columns
-    rawDataReduced2 <- rawDataReduced[-idx]
-
-### Preparing the data for training
-
-Now, the dataset contains one outcome column (`classe`) and 59 feature
-columns. The function `createDataPartition` of the `caret` package is
-used to split the data into a training and a cross-validation data set.
-Here, 70% of the data goes into the training set.
+Data Preprocessing
+------------------
 
     library(caret)
-
-    inTrain <- createDataPartition(y = rawDataReduced2$classe, p = 0.7, list = FALSE)
-
-The index `inTrain` is used to split the data.
-
-    training <- rawDataReduced2[inTrain, ]
-    # the number of columns on the training set
-    nrow(training)
-
-    ## [1] 13737
-
-    crossval <- rawDataReduced2[-inTrain, ]
-    # the number of rows in the cross-validation set
-    nrow(crossval)
-
-    ## [1] 5885
-
-### Train a model
-
-I used the *random-forest* technique to generate a predictive model. In
-sum, 10 models were trained. I played around with the parameters passed
-to `trControl` and specified different models with bootstrapping
-(`method = "boot"`) and cross-validation (`method = "cv"`).
-
-It took more than one day to train all models. Afterwards I tested their
-performance on the cross-validation dataset. It turned out that all
-models showed a good performance (because their accuracy was above 99%)
-though their training times were quite different.
-
-Due to the similar performance, I will present the model with the
-shortest training time.
-
+    library(rpart)
+    library(rpart.plot)
     library(randomForest)
+    library(corrplot)
 
-    trControl <- trainControl(method = "cv", number = 2)
-    modFit <- train(classe ~ ., data = training, method = "rf", prox = TRUE, trControl = trControl)
+### Read the Data
 
-### Evaluate the model (out-of-sample error)
+Load the data into two data frames.
 
-First, the final model is used to predict the outcome in the
-cross-validation dataset.
+    trainRaw <- read.csv("pml-training.csv")
+    testRaw <- read.csv("pml-testing.csv")
+    dim(trainRaw)
 
-    pred <- predict(modFit, newdata = crossval)
+    ## [1] 19622   160
 
-Second, the function `confusionMatrix` is used to calculate the accuracy
-of the prediction.
+    dim(testRaw)
 
-    coMa <- confusionMatrix(pred, reference = crossval$classe)
-    acc <- coMa$overall["Accuracy"]
-    acc
+    ## [1]  20 160
 
-    ##  Accuracy 
-    ## 0.9942226
+### Clean the data
 
-The accuracy of the prediction is 99.42%. Hence, the *out-of-sample
-error* is 0.58%.
+In this step, we will clean the data and get rid of observations with
+missing values as well as some meaningless variables.
 
-### Variable importance
+    sum(complete.cases(trainRaw))
 
-The five most important variables in the model and their relative
-importance values are:
+    ## [1] 406
 
-    vi <- varImp(modFit)$importance
-    vi[head(order(unlist(vi), decreasing = TRUE), 5L), , drop = FALSE]
+remove columns that contain NA missing values.
 
-    ##                     Overall
-    ## roll_belt         100.00000
-    ## pitch_forearm      58.90347
-    ## yaw_belt           51.37440
-    ## pitch_belt         43.02363
-    ## magnet_dumbbell_y  42.32896
+    trainRaw <- trainRaw[, colSums(is.na(trainRaw)) == 0] 
+    testRaw <- testRaw[, colSums(is.na(testRaw)) == 0] 
 
-------------------------------------------------------------------------
+Remove unwanted columns.
 
-#### The source of the data
+    classe <- trainRaw$classe
+    trainRemove <- grepl("^X|timestamp|window", names(trainRaw))
+    trainRaw <- trainRaw[, !trainRemove]
+    trainCleaned <- trainRaw[, sapply(trainRaw, is.numeric)]
+    trainCleaned$classe <- classe
+    testRemove <- grepl("^X|timestamp|window", names(testRaw))
+    testRaw <- testRaw[, !testRemove]
+    testCleaned <- testRaw[, sapply(testRaw, is.numeric)]
 
-The assignment is based on data of weight lifting exercises. It has been
-published:
+The cleaned training data set contains 19622 observations and 53
+variables, while the testing data set contains 20 observations and 53
+variables. The "classe" variable is still in the cleaned training set.
 
-Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H.
-[Qualitative Activity Recognition of Weight Lifting
-Exercises](http://groupware.les.inf.puc-rio.br/har#ixzz34irPKNuZ).
-*Proceedings of 4th International Conference in Cooperation with SIGCHI
-(Augmented Human '13)*. Stuttgart, Germany: ACM SIGCHI, 2013.
+### Slice the data
+
+We can split the cleaned training set into a Training data set (70%) and
+a validation data set (30%). We will use the validation data set to
+conduct cross validation in future steps.
+
+    set.seed(22519) # For reproducibile purpose
+    inTrain <- createDataPartition(trainCleaned$classe, p=0.70, list=F)
+    trainData <- trainCleaned[inTrain, ]
+    testData <- trainCleaned[-inTrain, ]
+
+Data Modeling
+-------------
+
+We fit a predictive model for activity recognition using **Random
+Forest** algorithm because it automatically selects important variables
+and is robust to correlated covariates & outliers in general. We will
+use **5-fold cross validation** when applying the algorithm.
+
+    controlRf <- trainControl(method="cv", 5)
+    modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf, ntree=250)
+    modelRf
+
+    ## Random Forest 
+    ## 
+    ## 13737 samples
+    ##    52 predictor
+    ##     5 classes: 'A', 'B', 'C', 'D', 'E' 
+    ## 
+    ## No pre-processing
+    ## Resampling: Cross-Validated (5 fold) 
+    ## Summary of sample sizes: 10989, 10989, 10991, 10990, 10989 
+    ## Resampling results across tuning parameters:
+    ## 
+    ##   mtry  Accuracy   Kappa    
+    ##    2    0.9901727  0.9875673
+    ##   27    0.9917015  0.9895017
+    ##   52    0.9840572  0.9798282
+    ## 
+    ## Accuracy was used to select the optimal model using  the largest value.
+    ## The final value used for the model was mtry = 27.
+
+Then, we estimate the performance of the model on the validation data
+set.
+
+    predictRf <- predict(modelRf, testData)
+    confusionMatrix(testData$classe, predictRf)
+
+    ## Confusion Matrix and Statistics
+    ## 
+    ##           Reference
+    ## Prediction    A    B    C    D    E
+    ##          A 1673    0    0    0    1
+    ##          B    5 1131    3    0    0
+    ##          C    0    0 1021    5    0
+    ##          D    0    0   13  949    2
+    ##          E    0    0    1    6 1075
+    ## 
+    ## Overall Statistics
+    ##                                           
+    ##                Accuracy : 0.9939          
+    ##                  95% CI : (0.9915, 0.9957)
+    ##     No Information Rate : 0.2851          
+    ##     P-Value [Acc > NIR] : < 2.2e-16       
+    ##                                           
+    ##                   Kappa : 0.9923          
+    ##  Mcnemar's Test P-Value : NA              
+    ## 
+    ## Statistics by Class:
+    ## 
+    ##                      Class: A Class: B Class: C Class: D Class: E
+    ## Sensitivity            0.9970   1.0000   0.9836   0.9885   0.9972
+    ## Specificity            0.9998   0.9983   0.9990   0.9970   0.9985
+    ## Pos Pred Value         0.9994   0.9930   0.9951   0.9844   0.9935
+    ## Neg Pred Value         0.9988   1.0000   0.9965   0.9978   0.9994
+    ## Prevalence             0.2851   0.1922   0.1764   0.1631   0.1832
+    ## Detection Rate         0.2843   0.1922   0.1735   0.1613   0.1827
+    ## Detection Prevalence   0.2845   0.1935   0.1743   0.1638   0.1839
+    ## Balanced Accuracy      0.9984   0.9992   0.9913   0.9927   0.9979
+
+    accuracy <- postResample(predictRf, testData$classe)
+    accuracy
+
+    ##  Accuracy     Kappa 
+    ## 0.9938828 0.9922620
+
+    oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+    oose
+
+    ## [1] 0.006117247
+
+So, the estimated accuracy of the model is 99.42% and the estimated
+out-of-sample error is 0.58%.
+
+Predicting for Test Data Set
+----------------------------
+
+Now, we apply the model to the original testing data set downloaded from
+the data source. We remove the `problem_id` column first.
+
+    result <- predict(modelRf, testCleaned[, -length(names(testCleaned))])
+    result
+
+    ##  [1] B A B A A E D B A A B C B A E E A B B B
+    ## Levels: A B C D E
+
+Appendix: Figures
+-----------------
+
+1.  Correlation Matrix Visualization
+
+<!-- -->
+
+    corrPlot <- cor(trainData[, -length(names(trainData))])
+    corrplot(corrPlot, method="color")
+
+![](MachineLearningProject_files/figure-markdown_strict/unnamed-chunk-11-1.png)
+2. Decision Tree Visualization
+
+    treeModel <- rpart(classe ~ ., data=trainData, method="class")
+    prp(treeModel) # fast plot
+
+![](MachineLearningProject_files/figure-markdown_strict/unnamed-chunk-12-1.png)
